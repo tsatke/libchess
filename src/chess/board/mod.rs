@@ -99,10 +99,83 @@ impl Board {
     }
 
     fn king_in_check(&mut self, color: Color) -> bool {
-        self.generate_moves(color.other())
+        // safe variant, slow AF
+
+        // self.generate_moves(color.other())
+        //     .into_iter()
+        //     .find(|m| m.is_capture() && self[m.to()].map_or(false, |p| p.kind() == Kind::King))
+        //     .is_some()
+
+        // better variant, check more targeted
+
+        let square_opt = self.find_king(color);
+        if square_opt.is_none() {
+            return false;
+        }
+
+        let square = square_opt.unwrap();
+        // detect check by rook, bishop or queen
+        for kind in [Kind::Rook, Kind::Bishop] {
+            if self
+                .generate_moves_sliding(color, square, kind)
+                .into_iter()
+                .map(|m| m.to())
+                .find(|&s| {
+                    if let Some(p) = self[s] {
+                        return p.color() == color.other()
+                            && match p.kind() {
+                                Kind::Queen => true,
+                                k => k == kind,
+                            };
+                    }
+                    false
+                })
+                .is_some()
+            {
+                return true;
+            }
+        }
+        // detect check by knight
+        if self
+            .generate_moves_knight(color, square)
             .into_iter()
-            .find(|m| m.is_capture() && self[m.to()].map_or(false, |p| p.kind() == Kind::King))
+            .map(|m| m.to())
+            .find(|&s| {
+                self[s].map_or(false, |p| {
+                    p.kind() == Kind::Knight && p.color() == color.other()
+                })
+            })
             .is_some()
+        {
+            return true;
+        }
+        // detect check by pawn
+        let (l, r) = match color {
+            Color::Black => (Direction::DownLeft, Direction::DownRight),
+            Color::White => (Direction::UpLeft, Direction::UpRight),
+        };
+        for dir in [l, r] {
+            if Board::within_board_bounds(square, dir) {
+                if let Some(piece) = self[square + dir] {
+                    if piece.color() == color.other() && piece.kind() == Kind::Pawn {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
+    fn find_king(&self, color: Color) -> Option<Square> {
+        for s in A1..=H8 {
+            if let Some(p) = self[s] {
+                if p.kind() == Kind::King && p.color() == color {
+                    return Some(s);
+                }
+            }
+        }
+        None
     }
 
     pub fn generate_moves(&mut self, color: Color) -> Vec<Move> {

@@ -20,6 +20,16 @@ mod tests {
     use crate::chess::board::setup::default_setup;
 
     #[test]
+    fn performance_perft() {
+        let mut b = Board::new();
+        b.populate(default_setup);
+
+        for _ in 0..20 {
+            assert_eq!(8902, perft(3, &mut b, Color::White),);
+        }
+    }
+
+    #[test]
     fn test_perft_table() {
         for table in [(0, 1), (1, 20), (2, 400), (3, 8902)] {
             let mut b = Board::new();

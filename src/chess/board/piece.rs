@@ -38,14 +38,14 @@ pub enum Color {
 }
 
 impl Color {
-    pub fn other(&self) -> Color {
+    pub const fn other(&self) -> Color {
         match self {
             Color::Black => Color::White,
             Color::White => Color::Black,
         }
     }
 
-    pub fn king_square(&self) -> Square {
+    pub const fn king_square(&self) -> Square {
         match self {
             Color::Black => E8,
             Color::White => E1,
