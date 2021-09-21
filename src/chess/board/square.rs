@@ -18,8 +18,8 @@ pub enum Direction {
     LeftLeftDown = -10,
     RightRightUp = 10,
     RightRightDown = -6,
-    DownDownLeft = -15,
-    DownDownRight = -17,
+    DownDownLeft = -17,
+    DownDownRight = -15,
 }
 
 macro_rules! square_enum_impl {
@@ -125,11 +125,11 @@ impl Square {
         Square::from((((row - 1) * 8) + (col - 1)) as usize)
     }
 
-    pub fn row(&self) -> u8 {
+    pub fn rank(&self) -> u8 {
         (*self as u8 / 8) + 1
     }
 
-    pub fn col(&self) -> u8 {
+    pub fn file(&self) -> u8 {
         (*self as u8 % 8) + 1
     }
 }
@@ -205,25 +205,25 @@ mod tests {
 
     #[test]
     fn test_row() {
-        assert_eq!(1, Square::A1.row());
-        assert_eq!(1, Square::B1.row());
-        assert_eq!(1, Square::C1.row());
-        assert_eq!(1, Square::D1.row());
-        assert_eq!(1, Square::E1.row());
-        assert_eq!(1, Square::F1.row());
-        assert_eq!(1, Square::G1.row());
-        assert_eq!(1, Square::H1.row());
+        assert_eq!(1, Square::A1.rank());
+        assert_eq!(1, Square::B1.rank());
+        assert_eq!(1, Square::C1.rank());
+        assert_eq!(1, Square::D1.rank());
+        assert_eq!(1, Square::E1.rank());
+        assert_eq!(1, Square::F1.rank());
+        assert_eq!(1, Square::G1.rank());
+        assert_eq!(1, Square::H1.rank());
     }
 
     #[test]
     fn test_col() {
-        assert_eq!(1, Square::A1.col());
-        assert_eq!(1, Square::A2.col());
-        assert_eq!(1, Square::A3.col());
-        assert_eq!(1, Square::A4.col());
-        assert_eq!(1, Square::A5.col());
-        assert_eq!(1, Square::A6.col());
-        assert_eq!(1, Square::A7.col());
-        assert_eq!(1, Square::A8.col());
+        assert_eq!(1, Square::A1.file());
+        assert_eq!(1, Square::A2.file());
+        assert_eq!(1, Square::A3.file());
+        assert_eq!(1, Square::A4.file());
+        assert_eq!(1, Square::A5.file());
+        assert_eq!(1, Square::A6.file());
+        assert_eq!(1, Square::A7.file());
+        assert_eq!(1, Square::A8.file());
     }
 }

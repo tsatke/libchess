@@ -2,6 +2,7 @@ use std::ops::{Index, IndexMut, Range};
 
 use arr_macro::arr;
 
+use crate::chess::board::iter::SquareIterator;
 use crate::chess::board::piece::{Color, Kind, Piece};
 use crate::chess::board::r#move::{Flags, Move};
 use crate::chess::board::square::Square::*;
@@ -12,6 +13,8 @@ pub mod piece;
 pub mod setup;
 pub mod square;
 
+mod iter;
+
 const BOARD_SIZE: usize = 64;
 
 pub enum MoveError {
@@ -19,7 +22,7 @@ pub enum MoveError {
     KingInCheck,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct Board {
     squares: [Option<Piece>; BOARD_SIZE],
     last_move: Option<Move>,
@@ -39,6 +42,10 @@ impl Board {
             castle_rights_black_kingside: true,
             castle_rights_black_queenside: true,
         }
+    }
+
+    pub fn squares(&self) -> impl Iterator<Item = Option<Piece>> + '_ {
+        SquareIterator::new(self)
     }
 
     pub fn populate<S>(&mut self, setup: S)
@@ -70,32 +77,35 @@ impl Board {
             .collect()
     }
 
-    pub fn make_move(mut self, mov: Move) -> Result<Board, MoveError> {
+    /// Attempts to perform the given move on the current board. The board is not
+    /// modified, but copied and returned as owned object.
+    pub fn make_move(&self, mov: Move) -> Result<Board, MoveError> {
         let piece = match self[mov.from()] {
             None => return Err(MoveError::IllegalMove),
             Some(p) => p,
         };
         let color = piece.color();
 
-        self[mov.from()] = None;
-        self[mov.to()] = Some(piece);
+        let mut b = self.clone();
+        b[mov.from()] = None;
+        b[mov.to()] = Some(piece);
 
-        if self.is_king_in_check(color) {
+        if b.king_in_check(color) {
             return Err(MoveError::KingInCheck);
         }
 
-        self.last_move = Some(mov);
-        Ok(self)
+        b.last_move = Some(mov);
+        Ok(b)
     }
 
-    fn is_king_in_check(&self, color: Color) -> bool {
+    fn king_in_check(&mut self, color: Color) -> bool {
         self.generate_moves(color.other())
             .into_iter()
             .find(|m| m.is_capture() && self[m.to()].map_or(false, |p| p.kind() == Kind::King))
             .is_some()
     }
 
-    pub fn generate_moves(&self, color: Color) -> Vec<Move> {
+    pub fn generate_moves(&mut self, color: Color) -> Vec<Move> {
         self.pieces_with_position()
             .into_iter()
             .filter(|(_, x)| x.color() == color)
@@ -114,7 +124,7 @@ impl Board {
     fn generate_moves_pawn(&self, color: Color, square: Square) -> Vec<Move> {
         let mut result = Vec::new();
 
-        if square.row()
+        if square.rank()
             == match color {
                 Color::Black => 1,
                 Color::White => 8,
@@ -130,7 +140,7 @@ impl Board {
 
         // normal moves
         if self[square + move_dir].is_none() {
-            if square.row() == promotion_possible_row {
+            if square.rank() == promotion_possible_row {
                 for promotion_flags in [
                     Flags::PROMOTION_BISHOP,
                     Flags::PROMOTION_KNIGHT,
@@ -145,14 +155,14 @@ impl Board {
             }
 
             // pawn sprint, but only if normal move is also possible
-            if square.row() == home_row && self[square + move_dir + move_dir].is_none() {
+            if square.rank() == home_row && self[square + move_dir + move_dir].is_none() {
                 let sprint = Move::new(square, square + move_dir + move_dir, Flags::PAWN_SPRINT);
                 result.push(sprint);
             }
         }
 
         // captures
-        let column = square.col();
+        let column = square.file();
         let can_capture = |target: Square| match self[target] {
             None => false,
             Some(piece) => piece.color() == color.other(),
@@ -160,7 +170,7 @@ impl Board {
         let generate_promotion_capture_moves = |target: Square| {
             let mut capture_promotion_moves = Vec::new();
 
-            if square.row() == promotion_possible_row {
+            if square.rank() == promotion_possible_row {
                 for promotion_flags in [
                     Flags::PROMOTION_BISHOP,
                     Flags::PROMOTION_KNIGHT,
@@ -199,13 +209,13 @@ impl Board {
             Some(mov) => mov.is_pawn_sprint(),
         };
         if ep_possible {
-            let sprint_col = self.last_move.as_ref().unwrap().from().col();
+            let sprint_col = self.last_move.as_ref().unwrap().from().file();
             if column == sprint_col - 1 || column == sprint_col + 1 {
                 let ep_base_row = match color {
                     Color::Black => 4,
                     Color::White => 5,
                 };
-                if square.row() == ep_base_row {
+                if square.rank() == ep_base_row {
                     let ep_move = Move::new(
                         square,
                         Square::from_coordinates(
@@ -255,20 +265,13 @@ impl Board {
 
         if color.king_square() == square && self.has_castle_rights(color) {
             // we can assume that the king is on its original square
-            let base_row = square.row();
-
-            let hostile_moves = self.generate_moves(color.other());
+            let base_row = square.rank();
 
             let is_kingside_rook_present = self[Square::from_coordinates(base_row, 8)]
                 .map_or(false, |p| p.kind() == Kind::Rook && p.color() == color);
             let is_kingside_free = self[square + Direction::Right].is_none()
                 && self[square + Direction::Right + Direction::Right].is_none();
-            let can_castle_kingside = hostile_moves
-                .iter()
-                .filter(|&m| m.to().row() == base_row)
-                .find(|&m| (5..=7).contains(&m.to().col()))
-                .is_none();
-            if is_kingside_rook_present && is_kingside_free && can_castle_kingside {
+            if is_kingside_rook_present && is_kingside_free {
                 let kingside_castle = Move::new(
                     square,
                     square + Direction::Right + Direction::Right,
@@ -281,12 +284,7 @@ impl Board {
                 .map_or(false, |p| p.kind() == Kind::Rook && p.color() == color);
             let is_queenside_free = self[square + Direction::Left].is_none()
                 && self[square + Direction::Left + Direction::Left].is_none();
-            let can_castle_queenside = hostile_moves
-                .iter()
-                .filter(|&m| m.to().row() == base_row)
-                .find(|&m| (2..=5).contains(&m.to().col()))
-                .is_none();
-            if is_queenside_rook_present && is_queenside_free && can_castle_queenside {
+            if is_queenside_rook_present && is_queenside_free {
                 let queenside_castle = Move::new(
                     square,
                     square + Direction::Left + Direction::Left,
@@ -379,23 +377,23 @@ impl Board {
 
     fn within_board_bounds(square: Square, direction: Direction) -> bool {
         match direction {
-            Direction::Up => square.row() < 8,
-            Direction::Down => square.row() > 1,
-            Direction::Left => square.col() > 1,
-            Direction::Right => square.col() < 8,
-            Direction::UpLeft => square.col() > 1 && square.row() < 8,
-            Direction::UpRight => square.col() < 8 && square.row() < 8,
-            Direction::DownLeft => square.col() > 1 && square.row() > 1,
-            Direction::DownRight => square.col() < 8 && square.row() > 1,
+            Direction::Up => square.rank() < 8,
+            Direction::Down => square.rank() > 1,
+            Direction::Left => square.file() > 1,
+            Direction::Right => square.file() < 8,
+            Direction::UpLeft => square.file() > 1 && square.rank() < 8,
+            Direction::UpRight => square.file() < 8 && square.rank() < 8,
+            Direction::DownLeft => square.file() > 1 && square.rank() > 1,
+            Direction::DownRight => square.file() < 8 && square.rank() > 1,
             // knight directions
-            Direction::UpUpLeft => square.row() < 7 && square.col() > 1,
-            Direction::UpUpRight => square.row() < 7 && square.col() < 8,
-            Direction::LeftLeftUp => square.row() < 8 && square.col() > 2,
-            Direction::LeftLeftDown => square.row() > 1 && square.col() > 2,
-            Direction::RightRightUp => square.row() < 8 && square.col() < 7,
-            Direction::RightRightDown => square.row() > 1 && square.col() < 7,
-            Direction::DownDownLeft => square.row() > 2 && square.col() > 1,
-            Direction::DownDownRight => square.row() > 2 && square.col() < 8,
+            Direction::UpUpLeft => square.rank() < 7 && square.file() > 1,
+            Direction::UpUpRight => square.rank() < 7 && square.file() < 8,
+            Direction::LeftLeftUp => square.rank() < 8 && square.file() > 2,
+            Direction::LeftLeftDown => square.rank() > 1 && square.file() > 2,
+            Direction::RightRightUp => square.rank() < 8 && square.file() < 7,
+            Direction::RightRightDown => square.rank() > 1 && square.file() < 7,
+            Direction::DownDownLeft => square.rank() > 2 && square.file() > 1,
+            Direction::DownDownRight => square.rank() > 2 && square.file() < 8,
         }
     }
 
@@ -431,8 +429,17 @@ impl Default for Board {
 mod tests {
     use super::*;
     use crate::chess::board::piece::{Color, Kind};
+    use crate::chess::board::setup::default_setup;
 
     extern crate test;
+
+    #[test]
+    fn test_move_gen_default_setup() {
+        let mut b = Board::new();
+        b.populate(default_setup);
+
+        assert_eq!(20, b.generate_moves(Color::White).len());
+    }
 
     #[test]
     fn test_make_move_simple() {
@@ -443,7 +450,7 @@ mod tests {
         assert_eq!(None, b[B4]);
 
         let test_move = Move::new(B2, B4, Flags::PAWN_SPRINT);
-        let move_result = b.make_move(test_move);
+        let move_result = b.make_move(test_move.clone());
         assert!(move_result.is_ok());
         let new_board = move_result.ok().unwrap();
         let expected = Board {
@@ -803,6 +810,18 @@ mod tests {
         assert_eq!(64, pieces.len());
         for i in A1..=H8 {
             assert!(pieces.contains(&(i, Piece::new(Color::Black, Kind::Pawn))));
+        }
+    }
+
+    #[test]
+    fn test_squares_iterator() {
+        let mut b = Board::new();
+        for i in A1..=H8 {
+            b.place(i, Piece::new(Color::Black, Kind::Rook));
+        }
+
+        for sq in b.squares() {
+            assert_eq!(Some(Piece::new(Color::Black, Kind::Rook)), sq);
         }
     }
 }

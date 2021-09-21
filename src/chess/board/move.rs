@@ -22,7 +22,7 @@ bitflags! {
     }
 }
 
-#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub struct Move {
     from: Square,
     to: Square,
