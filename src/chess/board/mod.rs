@@ -232,23 +232,18 @@ impl Board {
     fn generate_moves_pawn(&self, color: Color, square: Square) -> Vec<Move> {
         let mut result = Vec::new();
 
-        if square.rank()
-            == match color {
-                Color::Black => 1,
-                Color::White => 8,
-            }
-        {
+        if square.rank() == 1 || square.rank() == 8 {
             return result;
         }
 
-        let (move_dir, home_row, promotion_possible_row) = match color {
+        let (move_dir, home_rank, promotion_possible_rank) = match color {
             Color::Black => (Direction::Down, 7_u8, 2_u8),
             Color::White => (Direction::Up, 2_u8, 7_u8),
         };
 
         // normal moves
         if self[square + move_dir].is_none() {
-            if square.rank() == promotion_possible_row {
+            if square.rank() == promotion_possible_rank {
                 for promotion_flags in [
                     Flags::PROMOTION_BISHOP,
                     Flags::PROMOTION_KNIGHT,
@@ -263,14 +258,14 @@ impl Board {
             }
 
             // pawn sprint, but only if normal move is also possible
-            if square.rank() == home_row && self[square + move_dir + move_dir].is_none() {
+            if square.rank() == home_rank && self[square + move_dir + move_dir].is_none() {
                 let sprint = Move::new(square, square + move_dir + move_dir, Flags::PAWN_SPRINT);
                 result.push(sprint);
             }
         }
 
         // captures
-        let column = square.file();
+        let file = square.file();
         let can_capture = |target: Square| match self[target] {
             None => false,
             Some(piece) => piece.color() == color.other(),
@@ -278,7 +273,7 @@ impl Board {
         let generate_promotion_capture_moves = |target: Square| {
             let mut capture_promotion_moves = Vec::new();
 
-            if square.rank() == promotion_possible_row {
+            if square.rank() == promotion_possible_rank {
                 for promotion_flags in [
                     Flags::PROMOTION_BISHOP,
                     Flags::PROMOTION_KNIGHT,
@@ -298,17 +293,18 @@ impl Board {
 
             capture_promotion_moves
         };
-        // capture left
-        if column != 1 && can_capture(square + Direction::UpLeft) {
-            generate_promotion_capture_moves(square + Direction::UpLeft)
-                .into_iter()
-                .for_each(|m| result.push(m));
-        }
-        // capture right
-        if column != 8 && can_capture(square + Direction::UpRight) {
-            generate_promotion_capture_moves(square + Direction::UpRight)
-                .into_iter()
-                .for_each(|m| result.push(m));
+
+        // captures
+        let capture_dirs = match color {
+            Color::Black => [Direction::DownLeft, Direction::DownRight],
+            Color::White => [Direction::UpLeft, Direction::UpRight],
+        };
+        for dir in capture_dirs {
+            if Board::within_board_bounds(square, dir) && can_capture(square + dir) {
+                generate_promotion_capture_moves(square + dir)
+                    .into_iter()
+                    .for_each(|m| result.push(m));
+            }
         }
 
         // en passant
@@ -318,7 +314,7 @@ impl Board {
         };
         if ep_possible {
             let sprint_col = self.last_move.as_ref().unwrap().from().file();
-            if column == sprint_col - 1 || column == sprint_col + 1 {
+            if file == sprint_col - 1 || file == sprint_col + 1 {
                 let ep_base_row = match color {
                     Color::Black => 4,
                     Color::White => 5,
@@ -463,7 +459,7 @@ impl Board {
             Direction::DownDownRight,
         ];
 
-        for &dir in &directions {
+        for dir in directions {
             if Board::within_board_bounds(square, dir) {
                 match self[square + dir] {
                     None => {
@@ -589,7 +585,35 @@ mod tests {
     }
 
     #[test]
-    fn test_move_gen_queen_capture() {
+    fn test_move_gen_knight_capture() {
+        for color in [Color::White, Color::Black] {
+            let mut b = Board::new();
+            b.place(C4, Piece::new(color, Kind::Knight));
+
+            b.place(A3, Piece::new(color.other(), Kind::Rook));
+            b.place(A5, Piece::new(color.other(), Kind::Rook));
+            b.place(B2, Piece::new(color.other(), Kind::Rook));
+            b.place(B6, Piece::new(color.other(), Kind::Rook));
+            b.place(D2, Piece::new(color.other(), Kind::Rook));
+            b.place(D6, Piece::new(color.other(), Kind::Rook));
+            b.place(E3, Piece::new(color.other(), Kind::Rook));
+            b.place(E5, Piece::new(color.other(), Kind::Rook));
+
+            let moves = b.generate_moves(color);
+            assert_eq!(8, moves.len());
+            assert!(moves.contains(&Move::new(C4, A3, Flags::CAPTURE)));
+            assert!(moves.contains(&Move::new(C4, A5, Flags::CAPTURE)));
+            assert!(moves.contains(&Move::new(C4, B2, Flags::CAPTURE)));
+            assert!(moves.contains(&Move::new(C4, B6, Flags::CAPTURE)));
+            assert!(moves.contains(&Move::new(C4, D2, Flags::CAPTURE)));
+            assert!(moves.contains(&Move::new(C4, D6, Flags::CAPTURE)));
+            assert!(moves.contains(&Move::new(C4, E3, Flags::CAPTURE)));
+            assert!(moves.contains(&Move::new(C4, E5, Flags::CAPTURE)));
+        }
+    }
+
+    #[test]
+    fn test_move_gen_queen_capture_cornered() {
         for color in [Color::White, Color::Black] {
             let mut b = Board::new();
             b.place(A1, Piece::new(color, Kind::Queen));
@@ -640,6 +664,53 @@ mod tests {
             assert!(moves.contains(&Move::new(C4, C6, Flags::QUIET)));
             assert!(moves.contains(&Move::new(C4, C7, Flags::QUIET)));
             assert!(moves.contains(&Move::new(C4, C8, Flags::QUIET)));
+        }
+    }
+
+    #[test]
+    fn test_move_gen_queen_capture() {
+        for color in [Color::White, Color::Black] {
+            let mut b = Board::new();
+            b.place(C4, Piece::new(color, Kind::Queen));
+
+            b.place(A4, Piece::new(color.other(), Kind::Knight));
+            b.place(H4, Piece::new(color.other(), Kind::Knight));
+            b.place(C8, Piece::new(color.other(), Kind::Knight));
+            b.place(C1, Piece::new(color.other(), Kind::Knight));
+            b.place(G8, Piece::new(color.other(), Kind::Knight));
+            b.place(F1, Piece::new(color.other(), Kind::Knight));
+            b.place(A2, Piece::new(color.other(), Kind::Knight));
+            b.place(A6, Piece::new(color.other(), Kind::Knight));
+
+            let moves = b.generate_moves(color);
+            assert_eq!(25, moves.len());
+            assert!(moves.contains(&Move::new(C4, A2, Flags::CAPTURE)));
+            assert!(moves.contains(&Move::new(C4, B3, Flags::QUIET)));
+            assert!(moves.contains(&Move::new(C4, D3, Flags::QUIET)));
+            assert!(moves.contains(&Move::new(C4, E2, Flags::QUIET)));
+            assert!(moves.contains(&Move::new(C4, F1, Flags::CAPTURE)));
+            assert!(moves.contains(&Move::new(C4, B5, Flags::QUIET)));
+            assert!(moves.contains(&Move::new(C4, A6, Flags::CAPTURE)));
+            assert!(moves.contains(&Move::new(C4, D5, Flags::QUIET)));
+            assert!(moves.contains(&Move::new(C4, E6, Flags::QUIET)));
+            assert!(moves.contains(&Move::new(C4, F7, Flags::QUIET)));
+            assert!(moves.contains(&Move::new(C4, G8, Flags::CAPTURE)));
+
+            assert!(moves.contains(&Move::new(C4, A4, Flags::CAPTURE)));
+            assert!(moves.contains(&Move::new(C4, B4, Flags::QUIET)));
+            assert!(moves.contains(&Move::new(C4, D4, Flags::QUIET)));
+            assert!(moves.contains(&Move::new(C4, E4, Flags::QUIET)));
+            assert!(moves.contains(&Move::new(C4, F4, Flags::QUIET)));
+            assert!(moves.contains(&Move::new(C4, G4, Flags::QUIET)));
+            assert!(moves.contains(&Move::new(C4, H4, Flags::CAPTURE)));
+
+            assert!(moves.contains(&Move::new(C4, C1, Flags::CAPTURE)));
+            assert!(moves.contains(&Move::new(C4, C2, Flags::QUIET)));
+            assert!(moves.contains(&Move::new(C4, C3, Flags::QUIET)));
+            assert!(moves.contains(&Move::new(C4, C5, Flags::QUIET)));
+            assert!(moves.contains(&Move::new(C4, C6, Flags::QUIET)));
+            assert!(moves.contains(&Move::new(C4, C7, Flags::QUIET)));
+            assert!(moves.contains(&Move::new(C4, C8, Flags::CAPTURE)));
         }
     }
 
