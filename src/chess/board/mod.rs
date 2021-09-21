@@ -87,6 +87,41 @@ impl Board {
         let color = piece.color();
 
         let mut b = self.clone();
+
+        let (r1, r2) = match color {
+            Color::Black => (A8, H8),
+            Color::White => (A1, H1),
+        };
+        if piece.kind() == Kind::Rook {
+            match color {
+                Color::White => {
+                    if mov.from() == r1 {
+                        b.castle_rights_white_queenside = false;
+                    } else if mov.from() == r2 {
+                        b.castle_rights_white_kingside = false;
+                    }
+                }
+                Color::Black => {
+                    if mov.from() == r1 {
+                        b.castle_rights_black_queenside = false;
+                    } else if mov.from() == r2 {
+                        b.castle_rights_black_kingside = false;
+                    }
+                }
+            };
+        } else if piece.kind() == Kind::King {
+            match color {
+                Color::Black => {
+                    b.castle_rights_black_queenside = false;
+                    b.castle_rights_black_kingside = false;
+                }
+                Color::White => {
+                    b.castle_rights_white_queenside = false;
+                    b.castle_rights_white_kingside = false;
+                }
+            }
+        }
+
         b[mov.from()] = None;
         b[mov.to()] = Some(piece);
 
@@ -106,7 +141,7 @@ impl Board {
         //     .find(|m| m.is_capture() && self[m.to()].map_or(false, |p| p.kind() == Kind::King))
         //     .is_some()
 
-        // better variant, check more targeted
+        // better variant, checks more targeted
 
         let square_opt = self.find_king(color);
         if square_opt.is_none() {

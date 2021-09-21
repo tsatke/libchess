@@ -25,7 +25,7 @@ mod tests {
         b.populate(default_setup);
 
         for _ in 0..20 {
-            assert_eq!(8902, perft(3, &mut b, Color::White),);
+            assert_eq!(8902, perft(3, &mut b, Color::White));
         }
     }
 
