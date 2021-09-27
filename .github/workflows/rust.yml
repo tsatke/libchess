@@ -13,5 +13,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+        - name: Install latest nightly
+          uses: actions-rs/toolchain@v1
+          with:
+            toolchain: nightly
+            override: true
+            components: rustfmt, clippy
     - name: Test
       run: cargo test --verbose
