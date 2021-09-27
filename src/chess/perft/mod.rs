@@ -35,17 +35,6 @@ mod tests {
     use crate::chess::board::setup::default_setup;
 
     #[test]
-    fn performance_perft_5() {
-        // 2.07 seconds before modification
-        // 1.74 seconds after modification
-        // cargo test --color=always --package libchess --lib chess::perft::tests::performance_perft_5 --release -- --exact
-
-        let mut b = Board::new();
-        b.populate(default_setup);
-        perft(5, &mut b, Color::White);
-    }
-
-    #[test]
     fn test_perft_table() {
         for table in [
             (0, 1),
@@ -53,7 +42,7 @@ mod tests {
             (2, 400),
             (3, 8902),
             (4, 197281),
-            (5, 4865609),
+            // (5, 4865609),
         ] {
             let mut b = Board::new();
             b.populate(default_setup);
