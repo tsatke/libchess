@@ -17,9 +17,15 @@ mod iter;
 
 const BOARD_SIZE: usize = 64;
 
-pub enum MoveError {
-    IllegalMove,
-    KingInCheck,
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub struct MakeMoveModification {
+    made_move: Move,
+    last_move: Option<Move>,
+    taken_piece: Option<Piece>,
+    castle_rights_white_kingside_before: bool,
+    castle_rights_white_queenside_before: bool,
+    castle_rights_black_kingside_before: bool,
+    castle_rights_black_queenside_before: bool,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
@@ -77,16 +83,32 @@ impl Board {
             .collect()
     }
 
-    /// Attempts to perform the given move on the current board. The board is not
-    /// modified, but copied and returned as owned object.
-    pub fn make_move(&self, mov: Move) -> Result<Board, MoveError> {
+    pub fn unmake_move(&mut self, mov: MakeMoveModification) {
+        self.last_move = mov.last_move;
+        self[mov.made_move.from()] = self[mov.made_move.to()];
+        self[mov.made_move.to()] = mov.taken_piece;
+        self.castle_rights_white_kingside = mov.castle_rights_white_kingside_before;
+        self.castle_rights_white_queenside = mov.castle_rights_white_queenside_before;
+        self.castle_rights_black_kingside = mov.castle_rights_black_kingside_before;
+        self.castle_rights_black_queenside = mov.castle_rights_black_queenside_before;
+    }
+
+    pub fn make_move(&mut self, mov: Move) -> MakeMoveModification {
+        let original_state = MakeMoveModification {
+            made_move: mov.clone(),
+            last_move: self.last_move.clone(),
+            taken_piece: self[mov.to()],
+            castle_rights_white_kingside_before: self.castle_rights_white_kingside,
+            castle_rights_white_queenside_before: self.castle_rights_white_queenside,
+            castle_rights_black_kingside_before: self.castle_rights_black_kingside,
+            castle_rights_black_queenside_before: self.castle_rights_black_queenside,
+        };
+
         let piece = match self[mov.from()] {
-            None => return Err(MoveError::IllegalMove),
+            None => panic!("start of move is empty square"),
             Some(p) => p,
         };
         let color = piece.color();
-
-        let mut b = self.clone();
 
         let (r1, r2) = match color {
             Color::Black => (A8, H8),
@@ -96,53 +118,40 @@ impl Board {
             match color {
                 Color::White => {
                     if mov.from() == r1 {
-                        b.castle_rights_white_queenside = false;
+                        self.castle_rights_white_queenside = false;
                     } else if mov.from() == r2 {
-                        b.castle_rights_white_kingside = false;
+                        self.castle_rights_white_kingside = false;
                     }
                 }
                 Color::Black => {
                     if mov.from() == r1 {
-                        b.castle_rights_black_queenside = false;
+                        self.castle_rights_black_queenside = false;
                     } else if mov.from() == r2 {
-                        b.castle_rights_black_kingside = false;
+                        self.castle_rights_black_kingside = false;
                     }
                 }
             };
         } else if piece.kind() == Kind::King {
             match color {
                 Color::Black => {
-                    b.castle_rights_black_queenside = false;
-                    b.castle_rights_black_kingside = false;
+                    self.castle_rights_black_queenside = false;
+                    self.castle_rights_black_kingside = false;
                 }
                 Color::White => {
-                    b.castle_rights_white_queenside = false;
-                    b.castle_rights_white_kingside = false;
+                    self.castle_rights_white_queenside = false;
+                    self.castle_rights_white_kingside = false;
                 }
             }
         }
 
-        b[mov.from()] = None;
-        b[mov.to()] = Some(piece);
+        self[mov.from()] = None;
+        self[mov.to()] = Some(piece);
 
-        if b.king_in_check(color) {
-            return Err(MoveError::KingInCheck);
-        }
-
-        b.last_move = Some(mov);
-        Ok(b)
+        self.last_move = Some(mov);
+        original_state
     }
 
-    fn king_in_check(&mut self, color: Color) -> bool {
-        // safe variant, slow AF
-
-        // self.generate_moves(color.other())
-        //     .into_iter()
-        //     .find(|m| m.is_capture() && self[m.to()].map_or(false, |p| p.kind() == Kind::King))
-        //     .is_some()
-
-        // better variant, checks more targeted
-
+    pub fn king_in_check(&self, color: Color) -> bool {
         let square_opt = self.find_king(color);
         if square_opt.is_none() {
             return false;
@@ -155,7 +164,7 @@ impl Board {
                 .generate_moves_sliding(color, square, kind)
                 .into_iter()
                 .map(|m| m.to())
-                .find(|&s| {
+                .any(|s| {
                     if let Some(p) = self[s] {
                         return p.color() == color.other()
                             && match p.kind() {
@@ -165,7 +174,6 @@ impl Board {
                     }
                     false
                 })
-                .is_some()
             {
                 return true;
             }
@@ -175,12 +183,11 @@ impl Board {
             .generate_moves_knight(color, square)
             .into_iter()
             .map(|m| m.to())
-            .find(|&s| {
+            .any(|s| {
                 self[s].map_or(false, |p| {
                     p.kind() == Kind::Knight && p.color() == color.other()
                 })
             })
-            .is_some()
         {
             return true;
         }
@@ -538,6 +545,43 @@ mod tests {
     extern crate test;
 
     #[test]
+    fn test_make_unmake_default_setup() {
+        let mut b = Board::new();
+        b.populate(default_setup);
+
+        let moves = b.generate_moves(Color::White);
+        assert_eq!(20, moves.len());
+
+        for mov in moves {
+            let original = b.clone();
+
+            let res = b.make_move(mov);
+            b.unmake_move(res);
+            assert_eq!(original, b);
+        }
+    }
+
+    #[test]
+    fn test_make_unmake_capture() {
+        let mut b = Board::new();
+        b.place(C4, Piece::new(Color::White, Kind::Pawn));
+        b.place(D5, Piece::new(Color::Black, Kind::Pawn));
+
+        for color in [Color::White, Color::Black] {
+            let moves = b.generate_moves(color);
+            assert_eq!(2, moves.len());
+
+            for mov in moves {
+                let original = b.clone();
+
+                let res = b.make_move(mov);
+                b.unmake_move(res);
+                assert_eq!(original, b);
+            }
+        }
+    }
+
+    #[test]
     fn test_move_gen_default_setup() {
         let mut b = Board::new();
         b.populate(default_setup);
@@ -554,15 +598,7 @@ mod tests {
         assert_eq!(None, b[B4]);
 
         let test_move = Move::new(B2, B4, Flags::PAWN_SPRINT);
-        let move_result = b.make_move(test_move.clone());
-        assert!(move_result.is_ok());
-        let new_board = move_result.ok().unwrap();
-        let expected = Board {
-            last_move: Some(test_move),
-            squares: new_board.squares,
-            ..b
-        };
-        assert_eq!(expected, new_board);
+        let _ = b.make_move(test_move.clone());
     }
 
     #[test]
