@@ -2,7 +2,6 @@ use std::ops::{Index, IndexMut, Range};
 
 use arr_macro::arr;
 
-use crate::chess::board::iter::SquareIterator;
 use crate::chess::board::piece::{Color, Kind, Piece};
 use crate::chess::board::r#move::{Flags, Move};
 use crate::chess::board::square::Square::*;
@@ -12,8 +11,6 @@ pub mod r#move;
 pub mod piece;
 pub mod setup;
 pub mod square;
-
-mod iter;
 
 const BOARD_SIZE: usize = 64;
 
@@ -48,10 +45,6 @@ impl Board {
             castle_rights_black_kingside: true,
             castle_rights_black_queenside: true,
         }
-    }
-
-    pub fn squares(&self) -> impl Iterator<Item = Option<Piece>> + '_ {
-        SquareIterator::new(self)
     }
 
     pub fn populate<S>(&mut self, setup: S)
@@ -152,45 +145,17 @@ impl Board {
     }
 
     pub fn king_in_check(&self, color: Color) -> bool {
-        let square_opt = self.find_king(color);
-        if square_opt.is_none() {
-            return false;
-        }
+        let square = match self.find_king(color) {
+            None => return false,
+            Some(v) => v,
+        };
 
-        let square = square_opt.unwrap();
-        // detect check by rook, bishop or queen
-        for kind in [Kind::Rook, Kind::Bishop] {
-            if self
-                .generate_moves_sliding(color, square, kind)
-                .into_iter()
-                .map(|m| m.to())
-                .any(|s| {
-                    if let Some(p) = self[s] {
-                        return p.color() == color.other()
-                            && match p.kind() {
-                                Kind::Queen => true,
-                                k => k == kind,
-                            };
-                    }
-                    false
-                })
-            {
-                return true;
-            }
-        }
-        // detect check by knight
-        if self
-            .generate_moves_knight(color, square)
-            .into_iter()
-            .map(|m| m.to())
-            .any(|s| {
-                self[s].map_or(false, |p| {
-                    p.kind() == Kind::Knight && p.color() == color.other()
-                })
-            })
-        {
-            return true;
-        }
+        self.is_king_in_check_by_sliding(color, square)
+            || self.is_king_in_check_by_knights(color, square)
+            || self.is_king_in_check_by_pawns(color, square)
+    }
+
+    fn is_king_in_check_by_pawns(&self, color: Color, square: Square) -> bool {
         // detect check by pawn
         let (l, r) = match color {
             Color::Black => (Direction::DownLeft, Direction::DownRight),
@@ -205,12 +170,46 @@ impl Board {
                 }
             }
         }
+        false
+    }
 
+    fn is_king_in_check_by_knights(&self, color: Color, square: Square) -> bool {
+        // detect check by knight
+        let mut knight_moves = Vec::new();
+        self.generate_moves_knight(&mut knight_moves, color, square);
+        knight_moves.into_iter().map(|m| m.to()).any(|s| {
+            self[s].map_or(false, |p| {
+                p.kind() == Kind::Knight && p.color() == color.other()
+            })
+        })
+    }
+
+    fn is_king_in_check_by_sliding(&self, color: Color, square: Square) -> bool {
+        // detect check by rook, bishop or queen
+        for kind in [Kind::Rook, Kind::Bishop] {
+            let mut sliding_moves = Vec::new();
+            self.generate_moves_sliding(&mut sliding_moves, color, square, kind);
+
+            if sliding_moves
+                .into_iter()
+                .map(|m| m.to())
+                .filter_map(|s| self[s])
+                .any(|p| {
+                    p.color() == color.other()
+                        && match p.kind() {
+                            Kind::Queen => true,
+                            k => k == kind,
+                        }
+                })
+            {
+                return true;
+            }
+        }
         false
     }
 
     fn find_king(&self, color: Color) -> Option<Square> {
-        for s in A1..=H8 {
+        for s in Square::ALL {
             if let Some(p) = self[s] {
                 if p.kind() == Kind::King && p.color() == color {
                     return Some(s);
@@ -221,26 +220,24 @@ impl Board {
     }
 
     pub fn generate_moves(&mut self, color: Color) -> Vec<Move> {
+        let mut moves = Vec::new();
         self.pieces_with_position()
             .into_iter()
             .filter(|(_, x)| x.color() == color)
-            .map(|(i, x)| match x.kind() {
-                Kind::Pawn => self.generate_moves_pawn(color, i),
-                Kind::King => self.generate_moves_king(color, i),
-                Kind::Knight => self.generate_moves_knight(color, i),
-                Kind::Bishop | Kind::Rook | Kind::Queen => {
-                    self.generate_moves_sliding(color, i, x.kind())
-                }
-            })
-            .flat_map(|x| x.into_iter())
-            .collect()
+            .for_each(|(i, x)| match x.kind() {
+                Kind::Pawn => self.generate_moves_pawn(&mut moves, color, i),
+                Kind::King => self.generate_moves_king(&mut moves, color, i),
+                Kind::Knight => self.generate_moves_knight(&mut moves, color, i),
+                Kind::Bishop => self.generate_moves_bishop(&mut moves, color, i),
+                Kind::Rook => self.generate_moves_rook(&mut moves, color, i),
+                Kind::Queen => self.generate_moves_queen(&mut moves, color, i),
+            });
+        moves
     }
 
-    fn generate_moves_pawn(&self, color: Color, square: Square) -> Vec<Move> {
-        let mut result = Vec::new();
-
+    fn generate_moves_pawn(&self, result: &mut Vec<Move>, color: Color, square: Square) {
         if square.rank() == 1 || square.rank() == 8 {
-            return result;
+            return;
         }
 
         let (move_dir, home_rank, promotion_possible_rank) = match color {
@@ -342,13 +339,9 @@ impl Board {
                 }
             }
         }
-
-        result
     }
 
-    fn generate_moves_king(&self, color: Color, square: Square) -> Vec<Move> {
-        let mut result = Vec::new();
-
+    fn generate_moves_king(&self, result: &mut Vec<Move>, color: Color, square: Square) {
         // moves and captures
         for direction in [
             Direction::Up,
@@ -404,13 +397,27 @@ impl Board {
                 result.push(queenside_castle);
             }
         }
-
-        result
     }
 
-    fn generate_moves_sliding(&self, color: Color, square: Square, kind: Kind) -> Vec<Move> {
-        let mut result = Vec::new();
+    fn generate_moves_bishop(&self, result: &mut Vec<Move>, color: Color, square: Square) {
+        self.generate_moves_sliding(result, color, square, Kind::Bishop)
+    }
 
+    fn generate_moves_rook(&self, result: &mut Vec<Move>, color: Color, square: Square) {
+        self.generate_moves_sliding(result, color, square, Kind::Rook)
+    }
+
+    fn generate_moves_queen(&self, result: &mut Vec<Move>, color: Color, square: Square) {
+        self.generate_moves_sliding(result, color, square, Kind::Queen)
+    }
+
+    fn generate_moves_sliding(
+        &self,
+        result: &mut Vec<Move>,
+        color: Color,
+        square: Square,
+        kind: Kind,
+    ) {
         let directions = [
             Direction::Up,
             Direction::Down,
@@ -422,9 +429,9 @@ impl Board {
             Direction::DownRight,
         ];
         let r: Range<usize> = match kind {
-            Kind::Bishop => (4..8),
-            Kind::Rook => (0..4),
-            Kind::Queen => (0..8),
+            Kind::Bishop => 4..8,
+            Kind::Rook => 0..4,
+            Kind::Queen => 0..8,
             _ => panic!("{:?} @ {} is not a sliding piece", kind, square),
         };
         for &dir in &directions[r] {
@@ -448,13 +455,9 @@ impl Board {
                 current_square = target_square;
             }
         }
-
-        result
     }
 
-    fn generate_moves_knight(&self, color: Color, square: Square) -> Vec<Move> {
-        let mut result = Vec::new();
-
+    fn generate_moves_knight(&self, result: &mut Vec<Move>, color: Color, square: Square) {
         let directions = [
             Direction::UpUpLeft,
             Direction::UpUpRight,
@@ -482,8 +485,6 @@ impl Board {
                 };
             }
         }
-
-        result
     }
 
     fn within_board_bounds(square: Square, direction: Direction) -> bool {
@@ -541,8 +542,6 @@ mod tests {
     use super::*;
     use crate::chess::board::piece::{Color, Kind};
     use crate::chess::board::setup::default_setup;
-
-    extern crate test;
 
     #[test]
     fn test_make_unmake_default_setup() {
@@ -841,7 +840,8 @@ mod tests {
             b.place(B4, Piece::new(color.other(), Kind::Pawn));
             b.place(D4, Piece::new(color.other(), Kind::Pawn));
 
-            let moves = b.generate_moves_king(color, C4);
+            let mut moves = Vec::new();
+            b.generate_moves_king(&mut moves, color, C4);
             assert_eq!(6, moves.len());
             assert!(moves.contains(&Move::new(C4, B3, Flags::QUIET)));
             assert!(moves.contains(&Move::new(C4, B4, Flags::CAPTURE)));
@@ -858,7 +858,8 @@ mod tests {
         b.place(E1, Piece::new(Color::White, Kind::King));
         b.place(H1, Piece::new(Color::White, Kind::Rook));
 
-        let moves = b.generate_moves_king(Color::White, E1);
+        let mut moves = Vec::new();
+        b.generate_moves_king(&mut moves, Color::White, E1);
         assert_eq!(6, moves.len());
         assert!(moves.contains(&Move::new(E1, D1, Flags::QUIET)));
         assert!(moves.contains(&Move::new(E1, D2, Flags::QUIET)));
@@ -875,7 +876,8 @@ mod tests {
         b.place(E1, Piece::new(Color::White, Kind::King));
         b.place(H1, Piece::new(Color::White, Kind::Rook));
 
-        let moves = b.generate_moves_king(Color::White, E1);
+        let mut moves = Vec::new();
+        b.generate_moves_king(&mut moves, Color::White, E1);
         assert_eq!(6, moves.len());
         assert!(moves.contains(&Move::new(E1, D1, Flags::QUIET)));
         assert!(moves.contains(&Move::new(E1, D2, Flags::QUIET)));
@@ -890,7 +892,8 @@ mod tests {
         b.place(E8, Piece::new(Color::Black, Kind::King));
         b.place(H8, Piece::new(Color::Black, Kind::Rook));
 
-        let moves = b.generate_moves_king(Color::Black, E8);
+        let mut moves = Vec::new();
+        b.generate_moves_king(&mut moves, Color::Black, E8);
         assert_eq!(6, moves.len());
         assert!(moves.contains(&Move::new(E8, D8, Flags::QUIET)));
         assert!(moves.contains(&Move::new(E8, D7, Flags::QUIET)));
@@ -907,7 +910,8 @@ mod tests {
         b.place(E8, Piece::new(Color::Black, Kind::King));
         b.place(H8, Piece::new(Color::Black, Kind::Rook));
 
-        let moves = b.generate_moves_king(Color::Black, E8);
+        let mut moves = Vec::new();
+        b.generate_moves_king(&mut moves, Color::Black, E8);
         assert_eq!(6, moves.len());
         assert!(moves.contains(&Move::new(E8, D8, Flags::QUIET)));
         assert!(moves.contains(&Move::new(E8, D7, Flags::QUIET)));
@@ -1025,18 +1029,6 @@ mod tests {
         assert_eq!(64, pieces.len());
         for i in A1..=H8 {
             assert!(pieces.contains(&(i, Piece::new(Color::Black, Kind::Pawn))));
-        }
-    }
-
-    #[test]
-    fn test_squares_iterator() {
-        let mut b = Board::new();
-        for i in A1..=H8 {
-            b.place(i, Piece::new(Color::Black, Kind::Rook));
-        }
-
-        for sq in b.squares() {
-            assert_eq!(Some(Piece::new(Color::Black, Kind::Rook)), sq);
         }
     }
 }

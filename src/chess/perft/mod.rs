@@ -19,14 +19,6 @@ pub fn perft(depth: usize, board: &mut Board, color: Color) -> usize {
     }
 
     result
-
-    // board
-    //     .generate_moves(color)
-    //     .into_iter()
-    //     .map(|m| board.make_move(m))
-    //     .filter_map(|r| r.ok())
-    //     .map(|mut b| perft(depth - 1, &mut b, color.other()))m
-    //     .sum()
 }
 
 #[cfg(test)]

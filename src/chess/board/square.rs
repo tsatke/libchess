@@ -1,4 +1,3 @@
-use std::iter::Step;
 use std::ops::Add;
 
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Debug)]
@@ -46,6 +45,12 @@ macro_rules! square_enum_impl {
                     $($name::$vname => write!(f, "{:?}", $name::$vname),)*
                 }
             }
+        }
+
+        impl $name {
+            pub const ALL: [Self; 64] = [
+                $($name::$vname,)*
+            ];
         }
     }
 }
@@ -125,10 +130,12 @@ impl Square {
         Square::from((((row - 1) * 8) + (col - 1)) as usize)
     }
 
+    #[inline(always)]
     pub fn rank(&self) -> u8 {
         (*self as u8 / 8) + 1
     }
 
+    #[inline(always)]
     pub fn file(&self) -> u8 {
         (*self as u8 % 8) + 1
     }
@@ -148,7 +155,8 @@ impl From<Square> for usize {
     }
 }
 
-impl Step for Square {
+#[cfg(test)] // nice to have for tests, and also convenient in actual code, but really slow compared to slices
+impl std::iter::Step for Square {
     fn steps_between(start: &Self, end: &Self) -> Option<usize> {
         Some(*end as usize - *start as usize)
     }
@@ -157,7 +165,7 @@ impl Step for Square {
         if start as usize + count > Square::H8.into() {
             return None;
         }
-        Some(Square::from(start as usize + count))
+        Square::try_from(start as usize + count).ok()
     }
 
     fn backward_checked(start: Self, count: usize) -> Option<Self> {
@@ -165,7 +173,7 @@ impl Step for Square {
             return None;
         }
 
-        Some(Square::from(start as usize - count))
+        Square::try_from(start as usize - count).ok()
     }
 }
 

@@ -11,8 +11,8 @@ pub fn default_setup(b: &mut Board) {
     b.place(F1, Piece::new(Color::White, Kind::Bishop));
     b.place(G1, Piece::new(Color::White, Kind::Knight));
     b.place(H1, Piece::new(Color::White, Kind::Rook));
-    for square in A2..=H2 {
-        b.place(square, Piece::new(Color::White, Kind::Pawn));
+    for square in &Square::ALL[A2 as usize..=H2 as usize] {
+        b.place(*square, Piece::new(Color::White, Kind::Pawn));
     }
 
     // black pieces
@@ -24,8 +24,8 @@ pub fn default_setup(b: &mut Board) {
     b.place(F8, Piece::new(Color::Black, Kind::Bishop));
     b.place(G8, Piece::new(Color::Black, Kind::Knight));
     b.place(H8, Piece::new(Color::Black, Kind::Rook));
-    for square in A7..=H7 {
-        b.place(square, Piece::new(Color::Black, Kind::Pawn));
+    for square in &Square::ALL[A7 as usize..=H7 as usize] {
+        b.place(*square, Piece::new(Color::Black, Kind::Pawn));
     }
 }
 
